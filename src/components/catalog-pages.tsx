@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowRight, BookOpen, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { ArrowRight, BookOpen, CalendarDays, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { CatalogSelect } from '@/components/catalog-select';
 import type { CatalogOption } from '@/components/catalog-select';
 import { useAuth } from '@/components/providers';
@@ -18,10 +18,13 @@ type BookRecord = {
   coverUrl?: string;
   totalCopies: number;
   availableCopies: number;
+  issuedCopies?: number;
+  availabilityStatus?: 'Available' | 'Busy' | 'Unavailable';
   publishedYear?: number;
   description?: string;
 };
 type ManagedRecord = CatalogOption & { email?: string; biography?: string; description?: string; createdAt?: string };
+type BookPagination = { page: number; limit: number; total: number; totalPages: number };
 
 const message = (error: any) => error?.response?.data?.message || 'Something went wrong. Please try again.';
 function CatalogHeading({ eyebrow, title, subtitle, action }: { eyebrow: string; title: string; subtitle: string; action?: ReactNode }) {
@@ -70,6 +73,66 @@ function CatalogDialog({ title, close, children }: { title: string; close: () =>
   return <div className="modal-scrim" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><section ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}><header><h2>{title}</h2><button type="button" aria-label="Close" onClick={close}><X size={19}/></button></header>{children}</section></div>;
 }
 
+type BorrowerRecord = {
+  issueId: string;
+  student: { name: string; userId: string; semester: string; rollNumber: string; department: string };
+  issueDate: string;
+  dueDate: string;
+};
+
+function AvailabilityDetails({ bookId, isAdmin }: { bookId: string; isAdmin: boolean }) {
+  const [book, setBook] = useState<BookRecord | null>(null);
+  const [borrowers, setBorrowers] = useState<BorrowerRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [borrowerError, setBorrowerError] = useState('');
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      setBorrowerError('');
+      try {
+        const response = await api.get(`/books/${bookId}/availability`);
+        if (active) setBook(response.data.book);
+        if (isAdmin) {
+          try {
+            const borrowerResponse = await api.get(`/books/${bookId}/borrowers`);
+            if (active) setBorrowers(borrowerResponse.data.borrowers || []);
+          } catch (requestError) {
+            if (active) setBorrowerError(message(requestError));
+          }
+        } else if (active) setBorrowers([]);
+      } catch (requestError: any) {
+        if (active) setError(requestError?.response?.status === 404 ? 'This title is no longer in the library catalog.' : message(requestError));
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [bookId, isAdmin]);
+
+  const date = (value: string) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
+  const status = book?.availabilityStatus || 'Unavailable';
+  return loading ? <div className="availability-loading" role="status" aria-live="polite"><span className="catalog-spin"><RefreshCw size={17}/></span>Loading availability…</div> : error ? <div className="catalog-page-state catalog-page-error" role="alert"><b>{error.includes('no longer') ? 'Unavailable' : 'Could not load availability'}</b><span>{error}</span></div> : !book ? null : <div className="availability-details">
+    <div className="availability-book-heading">
+      <div className="availability-cover">{book.coverUrl ? <img src={book.coverUrl} alt={`Cover of ${book.title}`}/> : <BookOpen size={26}/>}</div>
+      <div><span className="category-tag">{book.category?.name || 'Uncategorized'}</span><h3>{book.title}</h3><p>{book.author?.name || 'Author unavailable'}</p></div>
+      <span className={`availability-badge ${status.toLowerCase()}`}>{status}</span>
+    </div>
+    <dl className="availability-facts">
+      <div><dt>ISBN</dt><dd>{book.isbn || 'Not listed'}</dd></div>
+      <div><dt>Total copies</dt><dd>{book.totalCopies}</dd></div>
+      <div><dt>Available</dt><dd>{book.availableCopies}</dd></div>
+      <div><dt>Issued</dt><dd>{book.issuedCopies ?? 0}</dd></div>
+    </dl>
+    {isAdmin && <section className="availability-borrowers"><div className="availability-section-heading"><div><span className="eyebrow">ACTIVE LOANS</span><h4>Current borrowers</h4></div><span>{borrowers.length}</span></div>
+      {borrowerError ? <p className="availability-message" role="alert">{borrowerError}</p> : borrowers.length ? <div className="availability-borrower-list">{borrowers.map(borrower => <article className="availability-borrower" key={borrower.issueId}><div className="availability-borrower-title"><b>{borrower.student.name}</b><span>{borrower.student.userId}</span></div><dl><div><dt>Semester</dt><dd>{borrower.student.semester || 'Not provided'}</dd></div><div><dt>Roll number</dt><dd>{borrower.student.rollNumber || 'Not provided'}</dd></div><div><dt>Department</dt><dd>{borrower.student.department || 'Not provided'}</dd></div><div><dt>Issued</dt><dd><CalendarDays size={13}/>{date(borrower.issueDate)}</dd></div><div><dt>Due</dt><dd><CalendarDays size={13}/>{date(borrower.dueDate)}</dd></div></dl></article>)}</div> : <p className="availability-message">There are no active borrowers for this title.</p>}
+    </section>}
+  </div>;
+}
+
 function ConfirmDialog({ title, detail, busy, close, confirm }: { title: string; detail: string; busy: boolean; close: () => void; confirm: () => void }) {
   const dialogRef = useDialogKeyboard(close, busy);
   return <div className="modal-scrim" onMouseDown={event => { if (event.target === event.currentTarget && !busy) close(); }}><section ref={dialogRef} className="modal confirm-dialog" role="alertdialog" aria-modal="true" aria-label={title} aria-describedby="confirm-detail" tabIndex={-1}><header><h2>{title}</h2><button type="button" aria-label="Close" disabled={busy} onClick={close}><X size={19}/></button></header><div className="confirm-dialog-body"><p id="confirm-detail">{detail}</p><div className="confirm-dialog-actions"><button className="btn" type="button" disabled={busy} onClick={close}>Cancel</button><button className="btn confirm-danger" type="button" disabled={busy} onClick={confirm}>{busy ? 'Removing…' : 'Delete'}</button></div></div></section></div>;
@@ -78,6 +141,8 @@ function ConfirmDialog({ title, detail, busy, close, confirm }: { title: string;
 export function BooksPage() {
   const { user, notify } = useAuth();
   const [books, setBooks] = useState<BookRecord[]>([]);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<BookPagination>({ page: 1, limit: 24, total: 0, totalPages: 0 });
   const [authors, setAuthors] = useState<CatalogOption[]>([]);
   const [categories, setCategories] = useState<CatalogOption[]>([]);
   const [search, setSearch] = useState('');
@@ -96,6 +161,9 @@ export function BooksPage() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BookRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [detailsBook, setDetailsBook] = useState<BookRecord | null>(null);
+  const [requestedEditId, setRequestedEditId] = useState('');
+  const handledEditRequest = useRef(false);
 
   const loadReferences = useCallback(async () => {
     setReferencesLoading(true);
@@ -116,16 +184,27 @@ export function BooksPage() {
     setBooksLoading(true);
     setBooksError('');
     try {
-      const response = await api.get('/books', { params: { search, category: categoryFilter, ...(availabilityFilter === 'available' ? { available: true } : {}) } });
+      const response = await api.get('/books', { params: {
+        search, page, limit: 24,
+        ...(categoryFilter ? { category: categoryFilter } : {}),
+        ...(authorFilter ? { author: authorFilter } : {}),
+        ...(availabilityFilter ? { available: availabilityFilter === 'available' } : {}),
+      } });
+      const responsePagination: BookPagination = response.data.pagination || { page, limit: 24, total: response.data.books.length, totalPages: 1 };
+      if (responsePagination.totalPages > 0 && page > responsePagination.totalPages) {
+        setPage(responsePagination.totalPages);
+        return;
+      }
       setBooks(response.data.books);
+      setPagination(responsePagination);
     } catch (error) {
       setBooksError(message(error));
     } finally {
       setBooksLoading(false);
     }
-  }, [availabilityFilter, categoryFilter, search]);
+  }, [authorFilter, availabilityFilter, categoryFilter, page, search]);
 
-  const visibleBooks = useMemo(() => books.filter(book => (!authorFilter || book.author?._id === authorFilter) && (availabilityFilter !== 'unavailable' || book.availableCopies === 0)), [authorFilter, availabilityFilter, books]);
+  const visibleBooks = books;
 
   useEffect(() => { void loadBooks(); }, [loadBooks]);
   useEffect(() => {
@@ -149,6 +228,33 @@ export function BooksPage() {
     setModal(true);
     void loadReferences();
   };
+
+  useEffect(() => {
+    setRequestedEditId(new URLSearchParams(window.location.search).get('edit') || '');
+  }, []);
+
+  useEffect(() => {
+    if (!requestedEditId || user?.role !== 'admin' || handledEditRequest.current) return;
+    handledEditRequest.current = true;
+    const openRequestedBook = async () => {
+      try {
+        const response = await api.get(`/books/${encodeURIComponent(requestedEditId)}/availability`);
+        if (!response.data.book) throw new Error('Book not found.');
+        const requestedBook = response.data.book as BookRecord;
+        setEditing(requestedBook);
+        setAuthorId(requestedBook.author?._id || '');
+        setCategoryId(requestedBook.category?._id || '');
+        setModal(true);
+        void loadReferences();
+      } catch (error) {
+        notify(message(error), 'error');
+      } finally {
+        window.history.replaceState(null, '', window.location.pathname);
+        setRequestedEditId('');
+      }
+    };
+    void openRequestedBook();
+  }, [loadReferences, notify, requestedEditId, user?.role]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -187,11 +293,12 @@ export function BooksPage() {
   return <div className="portal-content catalog-page">
     <CatalogHeading eyebrow="THE COLLECTION" title="Books" subtitle="Search and manage the titles held in your library." action={user?.role === 'admin' && <button className="btn dark" onClick={openAdd}><Plus size={16}/> Add a book</button>}/>
     <div className="catalog-toolbar">
-      <div className="filter-row"><label className="input-search"><Search size={17}/><input aria-label="Search the collection" placeholder="Search title, ISBN, or description" value={search} onChange={event => setSearch(event.target.value)}/></label><select aria-label="Filter by category" value={categoryFilter} onChange={event => setCategoryFilter(event.target.value)}><option value="">All categories</option>{categories.map(item => <option key={item._id} value={item._id}>{item.name}</option>)}</select><select aria-label="Filter by author" value={authorFilter} onChange={event => setAuthorFilter(event.target.value)}><option value="">All authors</option>{authors.map(item => <option key={item._id} value={item._id}>{item.name}</option>)}</select><select aria-label="Filter by availability" value={availabilityFilter} onChange={event => setAvailabilityFilter(event.target.value)}><option value="">Any availability</option><option value="available">Available</option><option value="unavailable">Checked out</option></select></div>
-      <div className="catalog-toolbar-meta"><span className="filter-count" aria-live="polite">{visibleBooks.length} {visibleBooks.length === 1 ? 'title' : 'titles'}</span><div className="catalog-view-toggle" role="group" aria-label="Book layout"><button type="button" aria-label="Card view" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid size={16}/></button><button type="button" aria-label="Table view" aria-pressed={view === 'table'} onClick={() => setView('table')}><List size={17}/></button></div></div>
+      <div className="filter-row"><label className="input-search"><Search size={17}/><input aria-label="Search the collection" placeholder="Search title, author, or ISBN" value={search} onChange={event => { setPage(1); setSearch(event.target.value); }}/></label><select aria-label="Filter by category" value={categoryFilter} onChange={event => { setPage(1); setCategoryFilter(event.target.value); }}><option value="">All categories</option>{categories.map(item => <option key={item._id} value={item._id}>{item.name}</option>)}</select><select aria-label="Filter by author" value={authorFilter} onChange={event => { setPage(1); setAuthorFilter(event.target.value); }}><option value="">All authors</option>{authors.map(item => <option key={item._id} value={item._id}>{item.name}</option>)}</select><select aria-label="Filter by availability" value={availabilityFilter} onChange={event => { setPage(1); setAvailabilityFilter(event.target.value); }}><option value="">Any availability</option><option value="available">Available</option><option value="unavailable">Checked out</option></select></div>
+      <div className="catalog-toolbar-meta"><span className="filter-count" aria-live="polite">{pagination.total} {pagination.total === 1 ? 'title' : 'titles'}</span><div className="catalog-view-toggle" role="group" aria-label="Book layout"><button type="button" aria-label="Card view" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid size={16}/></button><button type="button" aria-label="Table view" aria-pressed={view === 'table'} onClick={() => setView('table')}><List size={17}/></button></div></div>
     </div>
-    {booksLoading ? <div className="catalog-page-state" aria-live="polite"><span className="catalog-spin"><RefreshCw size={18}/></span>Loading books from the library…</div> : booksError ? <div className="catalog-page-state catalog-page-error"><b>Books could not be loaded.</b><span>{booksError}</span><button className="btn small" onClick={() => void loadBooks()}>Try again</button></div> : visibleBooks.length ? view === 'grid' ? <div className="manage-book-grid">{visibleBooks.map(book => <article className="manage-book" key={book._id}><div className="manage-book-cover">{book.coverUrl ? <img src={book.coverUrl} alt={`Cover of ${book.title}`}/> : <div className="book-cover-placeholder"><BookOpen size={24}/><span>LIBRARY<br/>COLLECTION</span></div>}<span className={book.availableCopies ? 'status-available' : 'status-unavailable'}>{book.availableCopies ? `${book.availableCopies} available` : 'All copies out'}</span></div><div className="manage-book-body"><span className="category-tag">{book.category?.name || 'Uncategorized'}</span><h3>{book.title}</h3><p>{book.author?.name || 'Author unavailable'}</p><div className="book-extra"><span>{book.isbn || 'No ISBN'}</span><span>{book.totalCopies} copies</span></div>{user?.role === 'admin' && <div className="row-actions"><button onClick={() => openEdit(book)}><Pencil size={14}/> Edit</button><button className="danger-text" onClick={() => setDeleteTarget(book)}><Trash2 size={14}/> Delete</button></div>}</div></article>)}</div> : <section className="panel catalog-inventory-table"><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Category</th><th>ISBN</th><th>Copies</th><th>Availability</th>{user?.role === 'admin' && <th>Actions</th>}</tr></thead><tbody>{visibleBooks.map(book => <tr key={book._id}><td><div className="inventory-title"><span>{book.coverUrl ? <img src={book.coverUrl} alt=""/> : <BookOpen size={17}/>}</span><b>{book.title}</b></div></td><td>{book.author?.name || 'Author unavailable'}</td><td>{book.category?.name || 'Uncategorized'}</td><td>{book.isbn || '—'}</td><td>{book.availableCopies} / {book.totalCopies}</td><td><span className={`inventory-status ${book.availableCopies ? 'in-stock' : 'out-of-stock'}`}>{book.availableCopies ? 'Available' : 'Checked out'}</span></td>{user?.role === 'admin' && <td><div className="row-actions"><button onClick={() => openEdit(book)}><Pencil size={14}/> Edit</button><button className="danger-text" onClick={() => setDeleteTarget(book)}><Trash2 size={14}/> Delete</button></div></td>}</tr>)}</tbody></table></div></section> : <section className="panel"><div className="empty-state"><BookOpen size={23}/><b>No books found</b><span>Try a different search or clear your filters.</span>{(search || categoryFilter || authorFilter || availabilityFilter) && <button className="btn small" onClick={() => { setSearch(''); setCategoryFilter(''); setAuthorFilter(''); setAvailabilityFilter(''); }}>Clear filters</button>}</div></section>}
+    {pagination.totalPages > 1 && <nav className="book-pagination" aria-label="Book catalog pages"><span>Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}</span><div><button className="btn small" type="button" disabled={page <= 1 || booksLoading} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button><span aria-current="page">Page {pagination.page} of {pagination.totalPages}</span><button className="btn small" type="button" disabled={page >= pagination.totalPages || booksLoading} onClick={() => setPage(value => Math.min(pagination.totalPages, value + 1))}>Next</button></div></nav>}{booksLoading ? <div className="catalog-page-state" aria-live="polite"><span className="catalog-spin"><RefreshCw size={18}/></span>Loading books from the library…</div> : booksError ? <div className="catalog-page-state catalog-page-error"><b>Books could not be loaded.</b><span>{booksError}</span><button className="btn small" onClick={() => void loadBooks()}>Try again</button></div> : visibleBooks.length ? view === 'grid' ? <div className="manage-book-grid">{visibleBooks.map(book => <article className="manage-book" key={book._id}><Link className="manage-book-hit-area" href={'/books/' + book._id} aria-label={'View details for ' + book.title}/><div className="manage-book-cover">{book.coverUrl ? <img src={book.coverUrl} alt={`Cover of ${book.title}`}/> : <div className="book-cover-placeholder"><BookOpen size={24}/><span>LIBRARY<br/>COLLECTION</span></div>}<span className={`status-${(book.availabilityStatus || 'Unavailable').toLowerCase()}`}>{book.availabilityStatus || 'Unavailable'}</span></div><div className="manage-book-body"><span className="category-tag">{book.category?.name || 'Uncategorized'}</span><h3>{book.title}</h3><p>{book.author?.name || 'Author unavailable'}</p><div className="book-extra"><span>{book.isbn || 'No ISBN'}</span><span>{book.availableCopies} available · {book.issuedCopies ?? 0} issued</span></div><button className="book-details-link" type="button" onClick={() => setDetailsBook(book)}>View availability details <ArrowRight size={14}/></button>{user?.role === 'admin' && <div className="row-actions"><button onClick={() => openEdit(book)}><Pencil size={14}/> Edit</button><button className="danger-text" onClick={() => setDeleteTarget(book)}><Trash2 size={14}/> Delete</button></div>}</div></article>)}</div> : <section className="panel catalog-inventory-table"><div className="table-wrap"><table><thead><tr><th>Title</th><th>Author</th><th>Category</th><th>ISBN</th><th>Copies</th><th>Availability</th><th>Details</th>{user?.role === 'admin' && <th>Actions</th>}</tr></thead><tbody>{visibleBooks.map(book => <tr key={book._id}><td><div className="inventory-title"><span>{book.coverUrl ? <img src={book.coverUrl} alt=""/> : <BookOpen size={17}/>}</span><Link className="inventory-book-link" href={'/books/' + book._id}>{book.title}</Link></div></td><td>{book.author?.name || 'Author unavailable'}</td><td>{book.category?.name || 'Uncategorized'}</td><td>{book.isbn || '—'}</td><td>{book.availableCopies} available / {book.issuedCopies ?? 0} issued</td><td><span className={`inventory-status ${(book.availabilityStatus || 'Unavailable').toLowerCase()}`}>{book.availabilityStatus || 'Unavailable'}</span></td><td><button className="book-details-link" type="button" onClick={() => setDetailsBook(book)}>Details</button></td>{user?.role === 'admin' && <td><div className="row-actions"><button onClick={() => openEdit(book)}><Pencil size={14}/> Edit</button><button className="danger-text" onClick={() => setDeleteTarget(book)}><Trash2 size={14}/> Delete</button></div></td>}</tr>)}</tbody></table></div></section> : <section className="panel"><div className="empty-state"><BookOpen size={23}/><b>{search ? 'Unavailable in this catalog' : 'No books found'}</b><span>{search ? `No titles matched “${search}”.` : 'Try a different search or clear your filters.'}</span>{(search || categoryFilter || authorFilter || availabilityFilter) && <button className="btn small" onClick={() => { setPage(1); setSearch(''); setCategoryFilter(''); setAuthorFilter(''); setAvailabilityFilter(''); }}>Clear filters</button>}</div></section>}
     {deleteTarget && <ConfirmDialog title="Remove this book?" detail={`“${deleteTarget.title}” will be removed from the collection.`} busy={deleting} close={() => setDeleteTarget(null)} confirm={() => void remove(deleteTarget)}/>}
+    {detailsBook && <CatalogDialog title="Book availability" close={() => setDetailsBook(null)}><AvailabilityDetails bookId={detailsBook._id} isAdmin={user?.role === 'admin'}/></CatalogDialog>}
     {modal && <CatalogDialog title={editing ? 'Edit book' : 'Add a book'} close={() => setModal(false)}><form className="modal-form" onSubmit={submit}>
       <label>Title<input name="title" required defaultValue={editing?.title}/></label>
       <div className="form-two catalog-select-row">

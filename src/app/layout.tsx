@@ -5,6 +5,8 @@ import './catalog.css';
 import './dashboard.css';
 import './globals.css';
 import './redesign.css';
+import './book-details.css';
+import './return-requests.css';
 
 export const metadata: Metadata = {
   title: 'Barguna politecnic Library',

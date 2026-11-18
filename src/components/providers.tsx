@@ -14,6 +14,7 @@ export type LibraryUser = {
   role: 'admin' | 'student';
   phone?: string;
   department?: string;
+  semester?: string;
   studentNumber?: string;
   createdAt?: string;
 };

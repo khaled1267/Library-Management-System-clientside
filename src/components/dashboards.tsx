@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { ArrowRight, BookMarked, BookOpen, CalendarDays, Clock3, GraduationCap, Library, RotateCcw, Settings, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { ArrowRight, BookMarked, BookOpen, CalendarDays, Check, Clock3, GraduationCap, Library, RotateCcw, Settings, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { useAuth } from '@/components/providers';
 import api from '@/lib/api';
+import { AdminReturnRequestsPanel, ReturnRequestAction } from '@/components/return-requests';
+import type { ReturnIssue } from '@/components/return-requests';
 
 type BookRecord = { _id: string; title: string; author?: { name?: string }; category?: { name?: string }; coverUrl?: string; availableCopies?: number };
-type IssueRecord = { _id: string; issueDate: string; dueDate: string; status: 'issued' | 'returned'; returnedAt?: string; book?: BookRecord; student?: { name?: string; userId?: string } };
+type IssueRecord = ReturnIssue;
 type StudentRecord = { _id: string; name: string; userId?: string; department?: string; createdAt?: string };
 type AdminDashboardData = {
   stats: { bookTitles: number; students: number; issued: number; availableBooks: number };
@@ -18,6 +20,7 @@ type AdminDashboardData = {
 };
 type StudentDashboardData = {
   stats: { available: number; availableBooks: number; issued: number; overdue: number; returned: number };
+  issues: IssueRecord[];
   recentIssues: IssueRecord[];
   recommendedBooks: BookRecord[];
 };
@@ -43,6 +46,7 @@ export function AdminDashboardPage() {
   const [recentBooks, setRecentBooks] = useState<BookRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -56,7 +60,7 @@ export function AdminDashboardPage() {
       if (booksResult.status === 'fulfilled') setRecentBooks((booksResult.value.data.books || []).slice(0, 4));
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [notify]);
+  }, [notify, refreshVersion]);
 
   return <div className="dash-page admin-dashboard-page">
     <section className="dash-welcome admin-welcome">
@@ -70,6 +74,7 @@ export function AdminDashboardPage() {
         <StatCard label="On loan" value={data.stats.issued} note="Active book issues" icon={BookMarked} tone="amber" index={2}/>
         <StatCard label="Available copies" value={data.stats.availableBooks} note="Ready to borrow" icon={Library} tone="green" index={3}/>
       </section>
+      <AdminReturnRequestsPanel onResolved={() => setRefreshVersion(version => version + 1)}/>
       <section className="dash-admin-grid">
         <article className="dash-panel">
           <header className="dash-panel-heading"><div><span className="dash-eyebrow">CIRCULATION</span><h2>Recent issue activity</h2></div><Link href="/admin/issues">All issues <ArrowRight size={15}/></Link></header>
@@ -93,7 +98,7 @@ export function AdminDashboardPage() {
         </article>
         <article className="dash-panel recent-books-panel">
           <header className="dash-panel-heading"><div><span className="dash-eyebrow">NEW TO THE LIBRARY</span><h2>Recently added</h2></div><Link href="/admin/books">View collection <ArrowRight size={15}/></Link></header>
-          {recentBooks.length ? <div className="recent-book-list">{recentBooks.map(book => <Link className="recent-book-row" href="/admin/books" key={book._id}><span className="recent-book-cover">{book.coverUrl ? <img src={book.coverUrl} alt=""/> : <BookOpen size={17}/>}</span><span><b>{book.title}</b><small>{book.author?.name || 'Author not listed'}</small></span><i>{book.availableCopies ?? 0} available</i></Link>)}</div> : <EmptyPanel title="No books to show" detail="Recently added titles will appear here."/>}
+          {recentBooks.length ? <div className="recent-book-list">{recentBooks.map(book => <Link className="recent-book-row" href={`/books/${book._id}`} key={book._id}><span className="recent-book-cover">{book.coverUrl ? <img src={book.coverUrl} alt=""/> : <BookOpen size={17}/>}</span><span><b>{book.title}</b><small>{book.author?.name || 'Author not listed'}</small></span><i>{book.availableCopies ?? 0} available</i></Link>)}</div> : <EmptyPanel title="No books to show" detail="Recently added titles will appear here."/>}
         </article>
       </section>
       <section className="dash-shortcuts"><div><span className="dash-eyebrow">QUICK ACTIONS</span><b>Keep the library moving</b></div><Link href="/admin/books"><BookOpen size={17}/>Manage books<ArrowRight size={14}/></Link><Link href="/admin/issues"><BookMarked size={17}/>Issue a book<ArrowRight size={14}/></Link><Link href="/admin/students"><Users size={17}/>Find a student<ArrowRight size={14}/></Link></section>
@@ -108,16 +113,27 @@ export function StudentDashboardPage() {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    api.get('/dashboard').then(response => setData(response.data)).catch(() => {
+    let active = true;
+    let hasLoaded = false;
+    const loadDashboard = () => api.get('/dashboard').then(response => { if (active) { setData(response.data); setFailed(false); } }).catch(() => {
+      if (!active) return;
       setFailed(true);
-      notify('Your library activity could not be loaded.', 'error');
-    }).finally(() => setLoading(false));
+      if (!hasLoaded) notify('Your library activity could not be loaded.', 'error');
+    }).finally(() => { if (active) setLoading(false); hasLoaded = true; });
+    void loadDashboard();
+    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') void loadDashboard(); };
+    window.addEventListener('focus', refreshWhenVisible);
+    return () => { active = false; window.removeEventListener('focus', refreshWhenVisible); };
   }, [notify]);
+
+  const latestApprovedReturn = data?.issues
+    .filter(issue => issue.status === 'returned' && issue.returnRequestStatus === 'approved')
+    .sort((left, right) => new Date(right.returnRequestReviewedAt || right.returnedAt || 0).getTime() - new Date(left.returnRequestReviewedAt || left.returnedAt || 0).getTime())[0];
 
   return <div className="dash-page student-dashboard-page">
     <section className="dash-welcome student-welcome">
       <div><span className="dash-eyebrow">YOUR CAMPUS LIBRARY</span><h1>Welcome back, {user?.name.split(' ')[0]}.</h1><p>Your next great read is closer than you think.</p><Link className="dash-primary-link" href="/student/books">Explore the collection <ArrowRight size={16}/></Link></div>
-      <div className="student-id-card"><span>LIBRARY CARD</span><GraduationCap size={23}/><b>{user?.userId || 'STUDENT'}</b><small>{user?.department || 'Northstar College'}</small></div>
+      <div className="student-id-card"><span>LIBRARY CARD</span><GraduationCap size={23}/><b>{user?.userId || 'STUDENT'}</b><small>{user?.department || 'Barguna Politechnic Institute'}</small></div>
     </section>
     {loading ? <LoadingPanel label="Loading your reading activity…"/> : failed || !data ? <EmptyPanel title="Your dashboard is unavailable" detail="Check the API connection and reload this page."/> : <>
       <section className="dash-stat-grid student-stat-grid" aria-label="Your library activity">
@@ -126,17 +142,18 @@ export function StudentDashboardPage() {
         <StatCard label="Overdue Books" value={data.stats.overdue} note="Please return these soon" icon={Clock3} tone="rose" index={2}/>
         <StatCard label="Returned Books" value={data.stats.returned} note="Completed loans" icon={RotateCcw} tone="violet" index={3}/>
       </section>
+      {latestApprovedReturn && <section className="student-return-approved-notice" role="status"><span><Check size={17}/></span><div><b>Return request approved</b><small>{latestApprovedReturn.book?.title || 'Your book'} was checked in {shortDate(latestApprovedReturn.returnRequestReviewedAt || latestApprovedReturn.returnedAt)}. The copy is available again.</small></div><Link href="/student/my-books">View loan history <ArrowRight size={14}/></Link></section>}
       <section className="dash-student-grid">
         <article className="dash-panel borrowed-panel">
-          <header className="dash-panel-heading"><div><span className="dash-eyebrow">YOUR READING HISTORY</span><h2>Recently borrowed</h2></div><Link href="/student/my-books">My books <ArrowRight size={15}/></Link></header>
-          {data.recentIssues.length ? <div className="borrowed-list">{data.recentIssues.map(issue => {
+          <header className="dash-panel-heading"><div><span className="dash-eyebrow">ACTIVE LOANS</span><h2>My Borrowed Books</h2></div><Link href="/student/my-books">Loan history <ArrowRight size={15}/></Link></header>
+          {data.issues?.filter(issue => issue.status === 'issued').length ? <div className="borrowed-list">{data.issues.filter(issue => issue.status === 'issued').map(issue => {
             const overdue = issue.status === 'issued' && new Date(issue.dueDate).getTime() < Date.now();
-            return <div className="borrowed-row" key={issue._id}><div className="borrowed-cover">{issue.book?.coverUrl ? <img src={issue.book.coverUrl} alt=""/> : <BookOpen size={19}/>}</div><div className="borrowed-info"><b>{issue.book?.title || 'Book unavailable'}</b><small>{issue.book?.author?.name || 'Library collection'}</small><span><CalendarDays size={13}/> Borrowed {shortDate(issue.issueDate)}</span></div><div className="borrowed-state"><span className={`dash-status ${overdue ? 'overdue' : issue.status}`}>{overdue ? 'Overdue' : issue.status === 'issued' ? 'On loan' : 'Returned'}</span>{issue.status === 'issued' && <small>{overdue ? 'Was due' : 'Due'} {shortDate(issue.dueDate)}</small>}</div></div>;
-          })}</div> : <EmptyPanel title="No borrowed books yet" detail="Books you borrow will show up here."/>}
+            return <div className="borrowed-row student-borrowed-row" key={issue._id}><div className="borrowed-cover">{issue.book?.coverUrl ? <img src={issue.book.coverUrl} alt={`Cover of ${issue.book.title || 'borrowed book'}`}/> : <BookOpen size={19}/>}</div><div className="borrowed-info"><b>{issue.book?.title || 'Book unavailable'}</b><small>{issue.book?.author?.name || 'Library collection'}</small><span><CalendarDays size={13}/> Borrowed {shortDate(issue.issueDate)}</span><span><CalendarDays size={13}/> Due {shortDate(issue.dueDate)}</span><span className={`dash-status ${overdue ? 'overdue' : 'issued'}`}>{overdue ? 'Overdue' : issue.returnRequestStatus === 'pending' ? 'Return pending' : 'On loan'}</span></div><ReturnRequestAction issue={issue}/></div>;
+          })}</div> : <EmptyPanel title="No active borrowed books" detail="Your active loans and return actions will appear here."/>}
         </article>
         <article className="dash-panel recommendation-panel">
           <header className="dash-panel-heading"><div><span className="dash-eyebrow">PICKED FROM THE SHELVES</span><h2>Recommended books</h2></div><Link href="/student/books">Browse all <ArrowRight size={15}/></Link></header>
-          {data.recommendedBooks.length ? <div className="recommendation-list">{data.recommendedBooks.map(book => <Link className="recommendation-row" href="/student/books" key={book._id}><span className="recommendation-cover">{book.coverUrl ? <img src={book.coverUrl} alt=""/> : <BookOpen size={20}/>}</span><span className="recommendation-copy"><b>{book.title}</b><small>{book.author?.name || 'Unknown author'}</small><i>{book.category?.name || 'Library pick'} · {book.availableCopies} available</i></span><ArrowRight size={16}/></Link>)}</div> : <EmptyPanel title="No recommendations yet" detail="New available books will appear here."/>}
+          {data.recommendedBooks.length ? <div className="recommendation-list">{data.recommendedBooks.map(book => <Link className="recommendation-row" href={`/books/${book._id}`} key={book._id}><span className="recommendation-cover">{book.coverUrl ? <img src={book.coverUrl} alt=""/> : <BookOpen size={20}/>}</span><span className="recommendation-copy"><b>{book.title}</b><small>{book.author?.name || 'Unknown author'}</small><i>{book.category?.name || 'Library pick'} · {book.availableCopies} available</i></span><ArrowRight size={16}/></Link>)}</div> : <EmptyPanel title="No recommendations yet" detail="New available books will appear here."/>}
         </article>
       </section>
       <section className="dash-student-note"><span><UserPlus size={20}/></span><div><b>Your library account is ready</b><small>Update your contact details or password from your profile.</small></div><Link href="/student/profile">Manage profile <ArrowRight size={15}/></Link></section>

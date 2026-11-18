@@ -113,7 +113,7 @@ function DashboardShell({ role, children }: { role: DashboardRole; children: Rea
     <aside className={`dashboard-sidebar ${menuOpen ? 'open' : ''}`} id="app-navigation" ref={sidebarRef}>
       <Link className="dashboard-brand" href={homeHref} onClick={() => setMenuOpen(false)}>
         <span className="dashboard-brand-icon"><Library size={19}/></span>
-        <span><b>Northstar</b><small>{role === 'admin' ? 'LIBRARY ADMIN' : 'STUDENT LIBRARY'}</small></span>
+        <span><b>Barguna Politechnic Institute</b><small>{role === 'admin' ? 'LIBRARY ADMIN' : 'STUDENT LIBRARY'}</small></span>
       </Link>
       <div className="dashboard-nav-label">{role === 'admin' ? 'MANAGEMENT' : 'YOUR LIBRARY'}</div>
       <nav aria-label={`${role} navigation`} className="dashboard-nav">
