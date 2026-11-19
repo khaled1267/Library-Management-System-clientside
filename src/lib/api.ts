@@ -1,30 +1,11 @@
 import axios from 'axios';
 
-export const normalizeApiBaseUrl = (value?: string) => {
-  const baseUrl = value?.trim().replace(/\/+$/, '');
-  if (!baseUrl) return undefined;
-  return `${baseUrl.replace(/(?:\/api)+$/i, '')}/api`;
-};
-
-const configuredApiBaseUrl = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
-const localApiBaseUrl = (() => {
-  if (!configuredApiBaseUrl) return false;
-  try { return ['localhost', '127.0.0.1', '::1'].includes(new URL(configuredApiBaseUrl).hostname); } catch { return false; }
-})();
-
-if (process.env.NODE_ENV === 'production' && (!configuredApiBaseUrl || localApiBaseUrl)) {
-  throw new Error('Configure NEXT_PUBLIC_API_URL to an absolute non-local API URL before a production build.');
-}
-
 const api = axios.create({
-  baseURL: configuredApiBaseUrl,
+  baseURL: '/api',
   withCredentials: true,
 });
 
 api.interceptors.request.use((config) => {
-  if (!configuredApiBaseUrl) {
-    return Promise.reject(new Error('NEXT_PUBLIC_API_URL must be configured before the app can call the API.'));
-  }
   return config;
 });
 

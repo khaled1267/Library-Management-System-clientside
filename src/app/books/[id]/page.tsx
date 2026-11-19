@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import BookDetailsClient from '@/components/book-details-client';
-import { normalizeApiBaseUrl } from '@/lib/api';
+import { getBackendApiBaseUrl } from '@/lib/backend-api-url.js';
 
 type RouteProps = { params: Promise<{ id: string }> };
 const libraryName = 'Barguna Polytechnic Library';
@@ -9,7 +9,7 @@ const objectIdPattern = /^[a-f\d]{24}$/i;
 export async function generateMetadata({ params }: RouteProps): Promise<Metadata> {
   const { id } = await params;
   if (!objectIdPattern.test(id)) return { title: `Book not found | ${libraryName}` };
-  const apiBaseUrl = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
+  const apiBaseUrl = getBackendApiBaseUrl();
   if (!apiBaseUrl) return { title: `Book details | ${libraryName}` };
 
   try {
