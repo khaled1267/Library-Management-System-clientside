@@ -1,6 +1,12 @@
 import axios from 'axios';
 
-const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+export const normalizeApiBaseUrl = (value?: string) => {
+  const baseUrl = value?.trim().replace(/\/+$/, '');
+  if (!baseUrl) return undefined;
+  return `${baseUrl.replace(/(?:\/api)+$/i, '')}/api`;
+};
+
+const configuredApiBaseUrl = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 const localApiBaseUrl = (() => {
   if (!configuredApiBaseUrl) return false;
   try { return ['localhost', '127.0.0.1', '::1'].includes(new URL(configuredApiBaseUrl).hostname); } catch { return false; }

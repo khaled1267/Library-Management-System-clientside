@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import BookDetailsClient from '@/components/book-details-client';
+import { normalizeApiBaseUrl } from '@/lib/api';
 
 type RouteProps = { params: Promise<{ id: string }> };
 const libraryName = 'Barguna Polytechnic Library';
@@ -8,11 +9,11 @@ const objectIdPattern = /^[a-f\d]{24}$/i;
 export async function generateMetadata({ params }: RouteProps): Promise<Metadata> {
   const { id } = await params;
   if (!objectIdPattern.test(id)) return { title: `Book not found | ${libraryName}` };
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  const apiBaseUrl = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
   if (!apiBaseUrl) return { title: `Book details | ${libraryName}` };
 
   try {
-    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, '')}/books/${id}/availability`, { cache: 'no-store' });
+    const response = await fetch(`${apiBaseUrl}/books/${id}/availability`, { cache: 'no-store' });
     if (!response.ok) return { title: `Book not found | ${libraryName}` };
     const payload = await response.json();
     const book = payload?.book;
